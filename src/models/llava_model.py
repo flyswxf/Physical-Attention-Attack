@@ -138,7 +138,7 @@ class LLaVAModel(BaseModel):
             try:
                 with torch.no_grad():
                     # 显式调用 vision tower 提取注意力
-                    vision_outputs = self.model.vision_tower(
+                    vision_outputs = self.model.model.vision_tower(
                         inputs["pixel_values"], output_attentions=True
                     )
                 if (
