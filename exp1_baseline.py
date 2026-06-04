@@ -93,7 +93,7 @@ def main():
         )
 
         # 5.2 模型推理并获取注意力
-        response, attention = model.run_inference_and_get_attention(
+        response, attention_dict = model.run_inference_and_get_attention(
             attack_image, prompt
         )
 
@@ -101,11 +101,19 @@ def main():
         attacked = is_attack_successful(response, target_word)
         if attacked:
             success_count += 1
-            heatmap_path = os.path.join(success_dir, f"{name}_heatmap{ext}")
+            heatmap_cross_path = os.path.join(success_dir, f"{name}_heatmap_cross{ext}")
+            heatmap_vision_path = os.path.join(success_dir, f"{name}_heatmap_vision{ext}")
         else:
-            heatmap_path = os.path.join(fail_dir, f"{name}_heatmap{ext}")
+            heatmap_cross_path = os.path.join(fail_dir, f"{name}_heatmap_cross{ext}")
+            heatmap_vision_path = os.path.join(fail_dir, f"{name}_heatmap_vision{ext}")
 
-        plot_attention_heatmap(attack_image, attention, text_bbox, heatmap_path)
+        # 分别绘制并保存两种热力图
+        if isinstance(attention_dict, dict):
+            plot_attention_heatmap(attack_image, attention_dict.get("cross_attention"), text_bbox, heatmap_cross_path)
+            plot_attention_heatmap(attack_image, attention_dict.get("vision_attention"), text_bbox, heatmap_vision_path)
+        else:
+            # 兼容模拟数据的旧接口
+            plot_attention_heatmap(attack_image, attention_dict, text_bbox, heatmap_cross_path)
 
     # 6. 统计与输出
     asr = (success_count / total_images) * 100

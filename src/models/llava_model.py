@@ -132,4 +132,53 @@ class LLaVAModel(BaseModel):
             except Exception as e:
                 print(f"注意力提取解析失败: {e}")
 
-        return generated_text, attention_map_2d
+        # 3. 提取 Vision Tower 的自注意力 (视觉模块最关注的地方)
+        vision_attention_map_2d = None
+        if "pixel_values" in inputs:
+            try:
+                with torch.no_grad():
+                    # 显式调用 vision tower 提取注意力
+                    vision_outputs = self.model.vision_tower(
+                        inputs["pixel_values"], output_attentions=True
+                    )
+                if (
+                    hasattr(vision_outputs, "attentions")
+                    and vision_outputs.attentions is not None
+                ):
+                    # 取最后一层的 attention: shape (batch, heads, seq_len, seq_len)
+                    last_layer_vision_attn = vision_outputs.attentions[-1]
+                    # 在所有的注意力头上取平均: shape (seq_len, seq_len)
+                    avg_vision_attn = last_layer_vision_attn.mean(dim=1).squeeze(0)
+
+                    # CLIP ViT 的第一个 token 是 CLS token
+                    # 提取 CLS token 对图像 patches (索引 1 到最后) 的注意力
+                    cls_attn = avg_vision_attn[0, 1:]
+
+                    if len(cls_attn) == 576:
+                        vision_attention_map_2d = (
+                            cls_attn.reshape(24, 24).cpu().to(torch.float32).numpy()
+                        )
+                        vision_attention_map_2d = (
+                            vision_attention_map_2d - vision_attention_map_2d.min()
+                        ) / (
+                            vision_attention_map_2d.max()
+                            - vision_attention_map_2d.min()
+                            + 1e-8
+                        )
+                    else:
+                        print(
+                            f"警告: 视觉模块注意力长度 ({len(cls_attn)}) 与预期的 (576) 不符。"
+                        )
+
+                    del last_layer_vision_attn
+                    del avg_vision_attn
+            except Exception as e:
+                print(f"视觉模块注意力提取解析失败: {e}")
+
+        # 将两种注意力打包返回
+        attention_dict = {
+            "cross_attention": attention_map_2d,
+            "vision_attention": vision_attention_map_2d,
+        }
+
+        return generated_text, attention_dict
