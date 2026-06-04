@@ -1,4 +1,9 @@
+# 模型权重
 model_weights/
+
+# 实验数据
+data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
