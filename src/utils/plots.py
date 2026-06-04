@@ -24,6 +24,24 @@ def plot_attention_heatmap(image, attention_map, bbox, output_path):
 
     image_np = np.array(image)
 
+    # 确保 image_np 是 RGB 格式，并且有 3 个通道
+    if len(image_np.shape) == 2:
+        image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2RGB)
+    elif image_np.shape[2] == 4:
+        image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
+
+    # 如果传入了真实的 attention_map (例如 24x24)，需要 resize 到原图大小
+    if attention_map is not None:
+        if (
+            attention_map.shape[0] != image_np.shape[0]
+            or attention_map.shape[1] != image_np.shape[1]
+        ):
+            attention_map = cv2.resize(
+                attention_map,
+                (image_np.shape[1], image_np.shape[0]),
+                interpolation=cv2.INTER_CUBIC,
+            )
+
     # 归一化并转为伪彩色 (Jet colormap)
     attention_map_uint8 = (attention_map * 255).astype(np.uint8)
     heatmap = cv2.applyColorMap(attention_map_uint8, cv2.COLORMAP_JET)
