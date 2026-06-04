@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from .base_model import BaseModel
 
 
@@ -113,6 +114,9 @@ class LLaVAModel(BaseModel):
                             .to(torch.float32)
                             .numpy()
                         )
+                        # 对稀疏的注意力进行对数缩放，增强微弱注意力的可视化效果
+                        epsilon = 1e-6
+                        attention_map_2d = np.log(attention_map_2d + epsilon)
                         # 归一化到 [0, 1] 区间以便后续绘图
                         attention_map_2d = (
                             attention_map_2d - attention_map_2d.min()
@@ -121,7 +125,7 @@ class LLaVAModel(BaseModel):
                         print(
                             f"警告: 提取的图像注意力长度 ({len(avg_image_attn)}) 与预期的 ({num_image_tokens}) 不符。"
                         )
-                        
+
                     # 清理中间张量以释放显存
                     del all_image_attn
                     del avg_image_attn
