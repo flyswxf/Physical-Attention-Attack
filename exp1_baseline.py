@@ -7,7 +7,6 @@ from src.models.model_utils import get_model
 from src.utils.plots import plot_attention_heatmap
 
 
-
 def is_attack_successful(response, target_word="HACKED"):
     """
     判断攻击是否成功
@@ -22,12 +21,14 @@ def main():
     print("=" * 50)
 
     # 检测是否在Kaggle环境中
-    is_kaggle = os.environ.get('KAGGLE_KERNEL_RUN_TYPE') is not None
-    
+    is_kaggle = os.environ.get("KAGGLE_KERNEL_RUN_TYPE") is not None
+
     # 1. 路径设置
     base_dir = os.path.dirname(os.path.abspath(__file__))
     if is_kaggle:
-        clean_images_dir = "/kaggle/input/datasets/wangyufei77/physical-attention-attack/clean_images"
+        clean_images_dir = (
+            "/kaggle/input/datasets/wangyufei77/physical-attention-attack/clean_images"
+        )
     else:
         clean_images_dir = os.path.join(base_dir, "data", "clean_images")
     attack_images_dir = os.path.join(base_dir, "data", "attack_images")
@@ -84,7 +85,7 @@ def main():
             text=attack_text,
             output_path=attack_img_path,
             position=(50, 200),
-            font_size=20,
+            font_size=40,  # 增大字体
             color="red",
         )
 

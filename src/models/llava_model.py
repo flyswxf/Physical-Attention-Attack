@@ -20,8 +20,12 @@ class LLaVAModel(BaseModel):
         print(f"Loading {self.model_id} onto {self.device}...")
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         # 为了提取attention，保持默认或者用float16。
+        # 注意：这里需要设置 attn_implementation="eager"，否则会报 sdpa 错误
         self.model = LlavaForConditionalGeneration.from_pretrained(
-            self.model_id, torch_dtype=torch.float16, low_cpu_mem_usage=True
+            self.model_id,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,
+            attn_implementation="eager",
         ).to(self.device)
 
         return True
@@ -56,10 +60,63 @@ class LLaVAModel(BaseModel):
         )
 
         # 2. 提取 Attention Maps
-        # 注意: LLaVA内部有视觉编码器(ViT)和语言模型(LLM)。
-        # outputs.attentions 通常是LLM层面的注意力（包括对图像Token的交叉注意力）
-        # 如果要提取纯ViT的注意力，可能需要注册hook。
-        # 这里我们返回所有的注意力数据供下游 vis_utils 分析
-        attention_maps = outputs.attentions if hasattr(outputs, "attentions") else None
+        # out.attentions：tuple[layer_num], 单层shape=[B, num_head, q_len, all_seq_len]
+        # LLaVA 的输出 output.attentions 是一个元组，长度为生成的 token 数量。
+        # 每一步的 attention 是一个元组，包含各层的 attention 张量。
+        attention_map_2d = None
+        if hasattr(outputs, "attentions"):
+            try:
+                # LLaVA 1.5 默认将图片编码为 576 个 patches (24x24)
+                num_image_tokens = 576
+                image_token_id = 32000  # LLaVA 中的 <image> token ID
 
-        return generated_text, attention_maps
+                input_ids = inputs["input_ids"][0]
+                image_idx = (input_ids == image_token_id).nonzero(as_tuple=True)[0]
+                # 找到图片 token 开始的位置
+                image_start_idx = image_idx[0].item() if len(image_idx) > 0 else 3
+
+                all_image_attn = []
+                # 遍历每一步生成的 token 的 attention
+                for step_idx, step_attn in enumerate(outputs.attentions):
+                    # 取最后一层的 attention: shape (batch, heads, q_len, k_len)
+                    last_layer_attn = step_attn[-1]
+                    # 在所有的注意力头上取平均: shape (q_len, k_len)
+                    attn = last_layer_attn.mean(dim=1).squeeze(0)
+
+                    if step_idx == 0:
+                        # 第一步，q_len 是整个 prompt 的长度。预测第一个词的是 prompt 的最后一个 token
+                        token_attn = attn[-1, :]
+                    else:
+                        # 后续步，q_len 是 1。当前生成的 token 对前面所有 token 的 attention
+                        token_attn = attn[0, :]
+
+                    # 截取对图片 patches 的 attention
+                    img_attn = token_attn[
+                        image_start_idx : image_start_idx + num_image_tokens
+                    ]
+                    all_image_attn.append(img_attn)
+
+                if all_image_attn:
+                    # 将所有生成 token 对图片的 attention 叠加并取平均
+                    avg_image_attn = torch.stack(all_image_attn).mean(dim=0)
+
+                    if len(avg_image_attn) == num_image_tokens:
+                        # 转换成 24x24 的 2D Numpy 数组
+                        attention_map_2d = (
+                            avg_image_attn.reshape(24, 24)
+                            .cpu()
+                            .to(torch.float32)
+                            .numpy()
+                        )
+                        # 归一化到 [0, 1] 区间以便后续绘图
+                        attention_map_2d = (
+                            attention_map_2d - attention_map_2d.min()
+                        ) / (attention_map_2d.max() - attention_map_2d.min() + 1e-8)
+                    else:
+                        print(
+                            f"警告: 提取的图像注意力长度 ({len(avg_image_attn)}) 与预期的 ({num_image_tokens}) 不符。"
+                        )
+            except Exception as e:
+                print(f"注意力提取解析失败: {e}")
+
+        return generated_text, attention_map_2d

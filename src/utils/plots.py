@@ -24,16 +24,6 @@ def plot_attention_heatmap(image, attention_map, bbox, output_path):
 
     image_np = np.array(image)
 
-    # 作为一个占位符测试流程，如果没传入真实的 attention_map，生成一个伪造的热力图
-    if attention_map is None:
-        # print("未收到真实的注意力数据，生成模拟热力图...")
-        attention_map = np.random.rand(image_np.shape[0], image_np.shape[1])
-        # 让 bbox 区域的注意力偏高一点模拟成功吸引注意力的场景
-        if bbox:
-            left, top, right, bottom = [int(v) for v in bbox]
-            attention_map[top:bottom, left:right] += 0.5
-            attention_map = np.clip(attention_map, 0, 1)
-
     # 归一化并转为伪彩色 (Jet colormap)
     attention_map_uint8 = (attention_map * 255).astype(np.uint8)
     heatmap = cv2.applyColorMap(attention_map_uint8, cv2.COLORMAP_JET)
