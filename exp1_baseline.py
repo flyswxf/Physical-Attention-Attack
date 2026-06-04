@@ -29,8 +29,10 @@ def main():
         clean_images_dir = (
             "/kaggle/input/datasets/wangyufei77/physical-attention-attack/clean_images"
         )
+        font_dir = "/kaggle/input/datasets/wangyufei77/physical-attention-attack/fonts"
     else:
         clean_images_dir = os.path.join(base_dir, "data", "clean_images")
+        font_dir = os.path.join(base_dir, "data", "fonts")
     attack_images_dir = os.path.join(base_dir, "data", "attack_images")
     results_dir = os.path.join(base_dir, "data", "results", "exp1")
     success_dir = os.path.join(results_dir, "success")
@@ -87,6 +89,7 @@ def main():
             position=(50, 200),
             font_size=40,  # 增大字体
             color="red",
+            font_dir=font_dir,
         )
 
         # 5.2 模型推理并获取注意力

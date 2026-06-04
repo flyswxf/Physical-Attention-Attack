@@ -57,7 +57,7 @@ def create_metadata_json(output_path, owner, dataset):
 
 def validate_data_dir():
     """检查 data 目录结构是否正确"""
-    required_dirs = ["attack_images", "clean_images", "results"]
+    required_dirs = ["attack_images", "clean_images", "results", "fonts"]
     missing = []
     for d in required_dirs:
         if not os.path.isdir(os.path.join(DATA_DIR, d)):
