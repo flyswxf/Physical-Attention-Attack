@@ -17,16 +17,21 @@ class LLaVAModel(BaseModel):
             print("警告: 缺少 transformers 库，请使用 pip install transformers 安装。")
             return False
 
-        print(f"Loading {self.model_id} onto {self.device}...")
+        print(f"Loading {self.model_id} (Multi-GPU auto mode)...")
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         # 为了提取attention，保持默认或者用float16。
         # 注意：这里需要设置 attn_implementation="eager"，否则会报 sdpa 错误
+        # 使用 device_map="auto" 让 transformers 自动分配模型层到两个 T4 GPU 上
         self.model = LlavaForConditionalGeneration.from_pretrained(
             self.model_id,
             torch_dtype=torch.float16,
             low_cpu_mem_usage=True,
             attn_implementation="eager",
-        ).to(self.device)
+            device_map="auto",
+        )
+
+        # 记录模型实际分配的设备（可能不再单纯是 'cuda:0'）
+        self.device = self.model.device
 
         return True
 
@@ -116,6 +121,10 @@ class LLaVAModel(BaseModel):
                         print(
                             f"警告: 提取的图像注意力长度 ({len(avg_image_attn)}) 与预期的 ({num_image_tokens}) 不符。"
                         )
+                        
+                    # 清理中间张量以释放显存
+                    del all_image_attn
+                    del avg_image_attn
             except Exception as e:
                 print(f"注意力提取解析失败: {e}")
 
