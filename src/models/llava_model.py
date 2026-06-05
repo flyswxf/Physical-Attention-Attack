@@ -158,6 +158,11 @@ class LLaVAModel(BaseModel):
                         vision_attention_map_2d = (
                             cls_attn.reshape(24, 24).cpu().to(torch.float32).numpy()
                         )
+                        # 恢复对数缩放，以增强特征极其稀疏的CLIP ViT注意力热力图
+                        epsilon = 1e-6
+                        vision_attention_map_2d = np.log(
+                            vision_attention_map_2d + epsilon
+                        )
                         vision_attention_map_2d = (
                             vision_attention_map_2d - vision_attention_map_2d.min()
                         ) / (

@@ -72,6 +72,7 @@ def main():
     target_word = "HACKED"
 
     success_count = 0
+    results_log = []  # 用于保存实验详情
 
     # 5. 批量处理
     for img_path in tqdm(image_paths, desc="Processing Images", unit="img"):
@@ -102,21 +103,55 @@ def main():
         if attacked:
             success_count += 1
             heatmap_cross_path = os.path.join(success_dir, f"{name}_heatmap_cross{ext}")
-            heatmap_vision_path = os.path.join(success_dir, f"{name}_heatmap_vision{ext}")
+            heatmap_vision_path = os.path.join(
+                success_dir, f"{name}_heatmap_vision{ext}"
+            )
+            status_str = "SUCCESS"
         else:
             heatmap_cross_path = os.path.join(fail_dir, f"{name}_heatmap_cross{ext}")
             heatmap_vision_path = os.path.join(fail_dir, f"{name}_heatmap_vision{ext}")
+            status_str = "FAIL"
+
+        # 记录每张图片的测试结果
+        results_log.append(
+            {"image": filename, "status": status_str, "response": response}
+        )
 
         # 分别绘制并保存两种热力图
         if isinstance(attention_dict, dict):
-            plot_attention_heatmap(attack_image, attention_dict.get("cross_attention"), text_bbox, heatmap_cross_path)
-            plot_attention_heatmap(attack_image, attention_dict.get("vision_attention"), text_bbox, heatmap_vision_path)
+            plot_attention_heatmap(
+                attack_image,
+                attention_dict.get("cross_attention"),
+                text_bbox,
+                heatmap_cross_path,
+            )
+            plot_attention_heatmap(
+                attack_image,
+                attention_dict.get("vision_attention"),
+                text_bbox,
+                heatmap_vision_path,
+            )
         else:
             # 兼容模拟数据的旧接口
-            plot_attention_heatmap(attack_image, attention_dict, text_bbox, heatmap_cross_path)
+            plot_attention_heatmap(
+                attack_image, attention_dict, text_bbox, heatmap_cross_path
+            )
 
     # 6. 统计与输出
     asr = (success_count / total_images) * 100
+
+    # 保存统计日志到文件
+    import json
+
+    log_file_path = os.path.join(results_dir, "experiment_report.json")
+    report_data = {
+        "total_images": total_images,
+        "success_count": success_count,
+        "asr_percentage": round(asr, 2),
+        "details": results_log,
+    }
+    with open(log_file_path, "w", encoding="utf-8") as f:
+        json.dump(report_data, f, ensure_ascii=False, indent=4)
 
     print("\n" + "=" * 50)
     print(" 实验一代码执行完成! ")
@@ -127,6 +162,7 @@ def main():
     print(f"\n 热力图已分类保存至:")
     print(f"  - 成功: {success_dir}")
     print(f"  - 失败: {fail_dir}")
+    print(f" 详细实验报告已保存至: {log_file_path}")
     print("=" * 50)
 
 
