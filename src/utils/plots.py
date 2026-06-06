@@ -30,17 +30,17 @@ def plot_attention_heatmap(image, attention_map, bbox, output_path):
     elif image_np.shape[2] == 4:
         image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
 
-    # 如果传入了真实的 attention_map (例如 24x24)，需要 resize 到原图大小
-    if attention_map is not None:
-        if (
-            attention_map.shape[0] != image_np.shape[0]
-            or attention_map.shape[1] != image_np.shape[1]
-        ):
-            attention_map = cv2.resize(
-                attention_map,
-                (image_np.shape[1], image_np.shape[0]),
-                interpolation=cv2.INTER_CUBIC,
-            )
+    title = "Attention Heatmap & Text Bounding Box"
+    # attention_map (例如 24x24)，需要 resize 到原图大小
+    if (
+        attention_map.shape[0] != image_np.shape[0]
+        or attention_map.shape[1] != image_np.shape[1]
+    ):
+        attention_map = cv2.resize(
+            attention_map,
+            (image_np.shape[1], image_np.shape[0]),
+            interpolation=cv2.INTER_CUBIC,
+        )
 
     # 归一化并转为伪彩色 (Jet colormap)
     attention_map_uint8 = (attention_map * 255).astype(np.uint8)
@@ -69,10 +69,89 @@ def plot_attention_heatmap(image, attention_map, bbox, output_path):
     plt.figure(figsize=(10, 10))
     plt.imshow(overlay)
     plt.axis("off")
-    plt.title("Attention Heatmap & Text Bounding Box")
+    plt.title(title)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     plt.savefig(output_path, bbox_inches="tight", dpi=150)
     plt.close()
 
     # print(f"Heatmap visualization saved to: {output_path}")
+
+
+def _collect_group_values(records, metric_key, group_key="status"):
+    grouped_values = {}
+    for record in records:
+        group_name = record.get(group_key, "UNKNOWN")
+        value = record.get(metric_key)
+        if value is None:
+            continue
+        grouped_values.setdefault(group_name, []).append(float(value))
+    return grouped_values
+
+
+def plot_metric_boxplot(records, metric_key, output_path, title, ylabel, group_key="status"):
+    """
+    绘制按分组对比的箱线图。
+    """
+    grouped_values = _collect_group_values(records, metric_key, group_key=group_key)
+    if not grouped_values:
+        return
+
+    labels = list(grouped_values.keys())
+    data = [grouped_values[label] for label in labels]
+
+    plt.figure(figsize=(8, 6))
+    plt.boxplot(data, labels=labels, patch_artist=True)
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.grid(axis="y", linestyle="--", alpha=0.3)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+
+
+def plot_metric_scatter(
+    records,
+    x_key,
+    y_key,
+    output_path,
+    title,
+    xlabel,
+    ylabel,
+    group_key="status",
+):
+    """
+    绘制两个指标之间的散点关系图。
+    """
+    colors = {
+        "SUCCESS": "#2ca02c",
+        "FAIL": "#d62728",
+    }
+
+    plt.figure(figsize=(8, 6))
+    plotted_groups = set()
+    for record in records:
+        x_value = record.get(x_key)
+        y_value = record.get(y_key)
+        if x_value is None or y_value is None:
+            continue
+
+        group_name = record.get(group_key, "UNKNOWN")
+        color = colors.get(group_name, "#1f77b4")
+        label = group_name if group_name not in plotted_groups else None
+        plotted_groups.add(group_name)
+        plt.scatter(float(x_value), float(y_value), alpha=0.7, c=color, label=label)
+
+    if plotted_groups:
+        plt.legend()
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.grid(linestyle="--", alpha=0.3)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()

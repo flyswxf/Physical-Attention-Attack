@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from .base_model import BaseModel
+from ..utils.attention_metrics import normalize_attention_for_visualization
 
 
 class LLaVAModel(BaseModel):
@@ -55,7 +56,7 @@ class LLaVAModel(BaseModel):
             # 设置 output_attentions=True 获取注意力图
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=100,
+                max_new_tokens=256,
                 output_attentions=True,
                 return_dict_in_generate=True,
             )
@@ -65,11 +66,11 @@ class LLaVAModel(BaseModel):
             outputs.sequences[0], skip_special_tokens=True
         )
 
-        # 2. 提取 Attention Maps
+        # 2. 提取 Cross Attention Maps
         # out.attentions：tuple[layer_num], 单层shape=[B, num_head, q_len, all_seq_len]
         # LLaVA 的输出 output.attentions 是一个元组，长度为生成的 token 数量。
         # 每一步的 attention 是一个元组，包含各层的 attention 张量。
-        attention_map_2d = None
+        cross_attention_raw = None
         if hasattr(outputs, "attentions"):
             try:
                 # LLaVA 1.5 默认将图片编码为 576 个 patches (24x24)
@@ -108,19 +109,12 @@ class LLaVAModel(BaseModel):
 
                     if len(avg_image_attn) == num_image_tokens:
                         # 转换成 24x24 的 2D Numpy 数组
-                        attention_map_2d = (
+                        cross_attention_raw = (
                             avg_image_attn.reshape(24, 24)
                             .cpu()
                             .to(torch.float32)
                             .numpy()
                         )
-                        # 对稀疏的注意力进行对数缩放，增强微弱注意力的可视化效果
-                        epsilon = 1e-6
-                        attention_map_2d = np.log(attention_map_2d + epsilon)
-                        # 归一化到 [0, 1] 区间以便后续绘图
-                        attention_map_2d = (
-                            attention_map_2d - attention_map_2d.min()
-                        ) / (attention_map_2d.max() - attention_map_2d.min() + 1e-8)
                     else:
                         print(
                             f"警告: 提取的图像注意力长度 ({len(avg_image_attn)}) 与预期的 ({num_image_tokens}) 不符。"
@@ -133,7 +127,7 @@ class LLaVAModel(BaseModel):
                 print(f"注意力提取解析失败: {e}")
 
         # 3. 提取 Vision Tower 的自注意力 (视觉模块最关注的地方)
-        vision_attention_map_2d = None
+        vision_attention_raw = None
         if "pixel_values" in inputs:
             try:
                 with torch.no_grad():
@@ -155,20 +149,8 @@ class LLaVAModel(BaseModel):
                     cls_attn = avg_vision_attn[0, 1:]
 
                     if len(cls_attn) == 576:
-                        vision_attention_map_2d = (
+                        vision_attention_raw = (
                             cls_attn.reshape(24, 24).cpu().to(torch.float32).numpy()
-                        )
-                        # 恢复对数缩放，以增强特征极其稀疏的CLIP ViT注意力热力图
-                        epsilon = 1e-6
-                        vision_attention_map_2d = np.log(
-                            vision_attention_map_2d + epsilon
-                        )
-                        vision_attention_map_2d = (
-                            vision_attention_map_2d - vision_attention_map_2d.min()
-                        ) / (
-                            vision_attention_map_2d.max()
-                            - vision_attention_map_2d.min()
-                            + 1e-8
                         )
                     else:
                         print(
@@ -182,8 +164,19 @@ class LLaVAModel(BaseModel):
 
         # 将两种注意力打包返回
         attention_dict = {
-            "cross_attention": attention_map_2d,
-            "vision_attention": vision_attention_map_2d,
+            "cross_attention_raw": cross_attention_raw,
+            "vision_attention_raw": vision_attention_raw,
+            # 兼容现有热力图流程，同时明确这些字段仅用于可视化。
+            "cross_attention": normalize_attention_for_visualization(
+                np.log(cross_attention_raw + 1e-6)
+                if cross_attention_raw is not None
+                else None
+            ),
+            "vision_attention": normalize_attention_for_visualization(
+                np.log(vision_attention_raw + 1e-6)
+                if vision_attention_raw is not None
+                else None
+            ),
         }
 
         return generated_text, attention_dict

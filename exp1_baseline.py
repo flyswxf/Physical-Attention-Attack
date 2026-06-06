@@ -1,11 +1,13 @@
 import os
-import glob
 import argparse
+import json
 from tqdm import tqdm
 
 from src.image_utils import inject_text_to_image
 from src.models.model_utils import get_model
 from src.utils.plots import plot_attention_heatmap
+from src.utils.attention_metrics import build_attention_record, save_attention_arrays
+from src.utils.exp1_analysis import generate_analysis_artifacts, save_records_to_csv
 
 
 def is_attack_successful(response, target_word="HACKED"):
@@ -65,11 +67,17 @@ def main():
     results_dir = os.path.join(base_dir, "data", "results", "exp1")
     success_dir = os.path.join(results_dir, "success")
     fail_dir = os.path.join(results_dir, "fail")
+    attention_arrays_dir = os.path.join(results_dir, "attention_arrays")
+    analysis_dir = os.path.join(results_dir, "analysis")
+    metrics_csv_path = os.path.join(results_dir, "attention_metrics.csv")
+    metrics_json_path = os.path.join(results_dir, "attention_metrics.json")
 
     os.makedirs(clean_images_dir, exist_ok=True)
     os.makedirs(attack_images_dir, exist_ok=True)
     os.makedirs(success_dir, exist_ok=True)
     os.makedirs(fail_dir, exist_ok=True)
+    os.makedirs(attention_arrays_dir, exist_ok=True)
+    os.makedirs(analysis_dir, exist_ok=True)
 
     # 2. 获取 clean_images 下的所有图片
     valid_exts = {".jpg", ".jpeg", ".png", ".bmp"}
@@ -101,6 +109,7 @@ def main():
 
     success_count = 0
     results_log = []  # 用于保存实验详情
+    attention_records = []  # 用于保存结构化注意力指标
 
     # 5. 批量处理
     for img_path in tqdm(image_paths, desc="Processing Images", unit="img"):
@@ -145,6 +154,23 @@ def main():
             {"image": filename, "status": status_str, "response": response}
         )
 
+        attention_payload = attention_dict if isinstance(attention_dict, dict) else {}
+        attention_record = build_attention_record(
+            image_name=filename,
+            status=status_str,
+            response=response,
+            bbox=text_bbox,
+            image_size=attack_image.size,
+            cross_attention_raw=attention_payload.get("cross_attention_raw"),
+            vision_attention_raw=attention_payload.get("vision_attention_raw"),
+        )
+        attention_records.append(attention_record)
+
+        attention_array_path = os.path.join(
+            attention_arrays_dir, f"{name}_attention.npz"
+        )
+        save_attention_arrays(attention_array_path, text_bbox, attention_payload)
+
         # 分别绘制并保存两种热力图
         if isinstance(attention_dict, dict):
             plot_attention_heatmap(
@@ -168,9 +194,6 @@ def main():
     # 6. 统计与输出
     asr = (success_count / total_images) * 100
 
-    # 保存统计日志到文件
-    import json
-
     log_file_path = os.path.join(results_dir, "experiment_report.json")
     report_data = {
         "total_images": total_images,
@@ -181,6 +204,12 @@ def main():
     with open(log_file_path, "w", encoding="utf-8") as f:
         json.dump(report_data, f, ensure_ascii=False, indent=4)
 
+    with open(metrics_json_path, "w", encoding="utf-8") as f:
+        json.dump(attention_records, f, ensure_ascii=False, indent=4)
+    save_records_to_csv(attention_records, metrics_csv_path)
+
+    analysis_artifacts = generate_analysis_artifacts(attention_records, analysis_dir)
+
     print("\n" + "=" * 50)
     print(" 实验一代码执行完成! ")
     print("=" * 50)
@@ -190,7 +219,12 @@ def main():
     print(f"\n 热力图已分类保存至:")
     print(f"  - 成功: {success_dir}")
     print(f"  - 失败: {fail_dir}")
+    print(f" 原始注意力数组已保存至: {attention_arrays_dir}")
     print(f" 详细实验报告已保存至: {log_file_path}")
+    print(f" 结构化指标 CSV 已保存至: {metrics_csv_path}")
+    print(f" 结构化指标 JSON 已保存至: {metrics_json_path}")
+    print(f" 分析摘要已保存至: {analysis_artifacts['summary_path']}")
+    print(f" 分析图表目录: {analysis_artifacts['output_dir']}")
     print("=" * 50)
 
 
