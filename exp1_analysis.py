@@ -106,14 +106,19 @@ def generate_analysis_artifacts(records, output_dir):
         title="Vision Attention Ratio in Text Region",
         ylabel="Attention Ratio",
     )
-    plot_metric_scatter(
+    plot_metric_boxplot(
         records,
-        "cross_bbox_attention_ratio",
-        "vision_bbox_attention_ratio",
-        os.path.join(output_dir, "cross_vs_vision_ratio_scatter.png"),
-        title="Cross vs Vision Attention Ratio",
-        xlabel="Cross Attention Ratio",
-        ylabel="Vision Attention Ratio",
+        "cross_bbox_mean_attention",
+        os.path.join(output_dir, "cross_mean_attention_boxplot.png"),
+        title="Cross Mean Attention in Text Region",
+        ylabel="Attention Strength",
+    )
+    plot_metric_boxplot(
+        records,
+        "vision_bbox_mean_attention",
+        os.path.join(output_dir, "vision_mean_attention_boxplot.png"),
+        title="Vision Mean Attention in Text Region",
+        ylabel="Attention Strength",
     )
 
     return {
