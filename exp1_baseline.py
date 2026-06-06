@@ -3,11 +3,13 @@ import argparse
 import json
 from tqdm import tqdm
 
+from exp1_analysis import generate_analysis_artifacts
 from src.image_utils import inject_text_to_image
 from src.models.model_utils import get_model
-from src.utils.plots import plot_attention_heatmap
 from src.utils.attention_metrics import build_attention_record, save_attention_arrays
-from src.utils.exp1_analysis import generate_analysis_artifacts, save_records_to_csv
+from src.utils.records import save_records_to_csv
+
+from src.utils.plots import plot_attention_heatmap
 
 
 def is_attack_successful(response, target_word="HACKED"):
@@ -87,11 +89,6 @@ def main():
             image_paths.append(os.path.join(clean_images_dir, f))
 
     total_images = len(image_paths)
-    if total_images == 0:
-        print(f"\n未在 {clean_images_dir} 中找到任何图片。")
-        print("请放入测试图片（如 1.jpg, 2.jpg...）后再运行本脚本。")
-        return
-
     print(f"找到 {total_images} 张测试图片，准备开始实验...\n")
 
     # 3. 加载模型
@@ -100,7 +97,7 @@ def main():
         model_family="llava", model_id="llava-hf/llava-1.5-7b-hf", device="cuda"
     )
     if not model.load_model():
-        print("模型加载失败（可能是缺少环境或显存不足），将使用模拟数据运行实验流程。")
+        raise RuntimeError("模型加载失败，实验终止。")
 
     # 4. 实验参数
     attack_text = args.attack_text
@@ -154,42 +151,40 @@ def main():
             {"image": filename, "status": status_str, "response": response}
         )
 
-        attention_payload = attention_dict if isinstance(attention_dict, dict) else {}
+        if not isinstance(attention_dict, dict):
+            raise TypeError(
+                f"attention_dict 类型错误，期望 dict，实际为 {type(attention_dict)}"
+            )
+
         attention_record = build_attention_record(
             image_name=filename,
             status=status_str,
             response=response,
             bbox=text_bbox,
             image_size=attack_image.size,
-            cross_attention_raw=attention_payload.get("cross_attention_raw"),
-            vision_attention_raw=attention_payload.get("vision_attention_raw"),
+            cross_attention_raw=attention_dict.get("cross_attention_raw"),
+            vision_attention_raw=attention_dict.get("vision_attention_raw"),
         )
         attention_records.append(attention_record)
 
         attention_array_path = os.path.join(
             attention_arrays_dir, f"{name}_attention.npz"
         )
-        save_attention_arrays(attention_array_path, text_bbox, attention_payload)
+        save_attention_arrays(attention_array_path, text_bbox, attention_dict)
 
         # 分别绘制并保存两种热力图
-        if isinstance(attention_dict, dict):
-            plot_attention_heatmap(
-                attack_image,
-                attention_dict.get("cross_attention"),
-                text_bbox,
-                heatmap_cross_path,
-            )
-            plot_attention_heatmap(
-                attack_image,
-                attention_dict.get("vision_attention"),
-                text_bbox,
-                heatmap_vision_path,
-            )
-        else:
-            # 兼容模拟数据的旧接口
-            plot_attention_heatmap(
-                attack_image, attention_dict, text_bbox, heatmap_cross_path
-            )
+        plot_attention_heatmap(
+            attack_image,
+            attention_dict["cross_attention"],
+            text_bbox,
+            heatmap_cross_path,
+        )
+        plot_attention_heatmap(
+            attack_image,
+            attention_dict["vision_attention"],
+            text_bbox,
+            heatmap_vision_path,
+        )
 
     # 6. 统计与输出
     asr = (success_count / total_images) * 100

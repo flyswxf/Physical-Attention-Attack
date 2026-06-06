@@ -1,11 +1,23 @@
-import csv
+import argparse
 import json
 import os
 from statistics import mean, median
 
-from .plots import plot_metric_boxplot, plot_metric_scatter
+from src.utils.plots import plot_metric_boxplot, plot_metric_scatter
+from src.utils.records import load_records_from_csv
 
 
+# NUMERIC_FIELDS 中各字段的含义:
+# - image_width / image_height: 攻击图像尺寸。
+# - bbox_left / bbox_top / bbox_right / bbox_bottom: 注入文字区域的像素级边界框。
+# - cross_bbox_attention_sum: 交叉注意力中，分配到文字区域的总注意力质量。
+# - cross_bbox_attention_ratio: 交叉注意力中，文字区域注意力占整图总注意力的比例。
+# - cross_bbox_mean_attention: 交叉注意力中，文字区域内部的平均注意力强度。
+# - cross_bbox_patch_coverage: 文字区域在交叉注意力 patch 网格上的覆盖面积。
+# - vision_bbox_attention_sum: 视觉自注意力中，分配到文字区域的总注意力质量。
+# - vision_bbox_attention_ratio: 视觉自注意力中，文字区域注意力占整图总注意力的比例。
+# - vision_bbox_mean_attention: 视觉自注意力中，文字区域内部的平均注意力强度。
+# - vision_bbox_patch_coverage: 文字区域在视觉注意力 patch 网格上的覆盖面积。
 NUMERIC_FIELDS = {
     "image_width",
     "image_height",
@@ -16,71 +28,19 @@ NUMERIC_FIELDS = {
     "cross_bbox_attention_sum",
     "cross_bbox_attention_ratio",
     "cross_bbox_mean_attention",
-    "cross_bbox_max_attention",
     "cross_bbox_patch_coverage",
-    "cross_topk_patch_in_bbox_ratio",
     "vision_bbox_attention_sum",
     "vision_bbox_attention_ratio",
     "vision_bbox_mean_attention",
-    "vision_bbox_max_attention",
     "vision_bbox_patch_coverage",
-    "vision_topk_patch_in_bbox_ratio",
 }
-
-BOOLEAN_FIELDS = {
-    "cross_attention_available",
-    "vision_attention_available",
-}
-
-
-def save_records_to_csv(records, output_path):
-    """
-    将结构化实验记录保存为 CSV。
-    """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    if not records:
-        return
-
-    fieldnames = list(records[0].keys())
-    with open(output_path, "w", encoding="utf-8", newline="") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def load_records_from_csv(csv_path):
-    """
-    从 CSV 读取实验记录，并恢复基础类型。
-    """
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"未找到实验指标文件: {csv_path}")
-
-    records = []
-    with open(csv_path, "r", encoding="utf-8", newline="") as csv_file:
-        reader = csv.DictReader(csv_file)
-        for row in reader:
-            parsed_row = {}
-            for key, value in row.items():
-                if value == "":
-                    parsed_row[key] = None
-                elif key in BOOLEAN_FIELDS:
-                    parsed_row[key] = value.lower() == "true"
-                elif key in NUMERIC_FIELDS:
-                    parsed_row[key] = float(value)
-                else:
-                    parsed_row[key] = value
-            records.append(parsed_row)
-    return records
-
 
 def _collect_metric_values(records, metric_key, status):
     values = []
     for record in records:
         if record.get("status") != status:
             continue
-        value = record.get(metric_key)
-        if value is not None:
-            values.append(float(value))
+        values.append(float(record[metric_key]))
     return values
 
 
@@ -102,22 +62,15 @@ def summarize_records(records):
     metric_keys = [
         "cross_bbox_attention_ratio",
         "cross_bbox_mean_attention",
-        "cross_topk_patch_in_bbox_ratio",
         "vision_bbox_attention_ratio",
         "vision_bbox_mean_attention",
-        "vision_topk_patch_in_bbox_ratio",
     ]
     for metric_key in metric_keys:
         summary["metrics"][metric_key] = {}
         for status in statuses:
             values = _collect_metric_values(records, metric_key, status)
             if not values:
-                summary["metrics"][metric_key][status] = {
-                    "count": 0,
-                    "mean": None,
-                    "median": None,
-                }
-                continue
+                raise ValueError(f"指标缺失: metric_key={metric_key}, status={status}")
 
             summary["metrics"][metric_key][status] = {
                 "count": len(values),
@@ -153,20 +106,6 @@ def generate_analysis_artifacts(records, output_dir):
         title="Vision Attention Ratio in Text Region",
         ylabel="Attention Ratio",
     )
-    plot_metric_boxplot(
-        records,
-        "cross_topk_patch_in_bbox_ratio",
-        os.path.join(output_dir, "cross_topk_ratio_boxplot.png"),
-        title="Cross Attention Top-K Coverage",
-        ylabel="Top-K Patch Ratio",
-    )
-    plot_metric_boxplot(
-        records,
-        "vision_topk_patch_in_bbox_ratio",
-        os.path.join(output_dir, "vision_topk_ratio_boxplot.png"),
-        title="Vision Attention Top-K Coverage",
-        ylabel="Top-K Patch Ratio",
-    )
     plot_metric_scatter(
         records,
         "cross_bbox_attention_ratio",
@@ -181,3 +120,39 @@ def generate_analysis_artifacts(records, output_dir):
         "summary_path": summary_path,
         "output_dir": output_dir,
     }
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Analyze structured attention metrics from experiment 1"
+    )
+    parser.add_argument(
+        "--results_dir",
+        type=str,
+        default=None,
+        help="实验一结果目录，默认使用 data/results/exp1",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    results_dir = args.results_dir or os.path.join(base_dir, "data", "results", "exp1")
+    metrics_csv_path = os.path.join(results_dir, "attention_metrics.csv")
+    analysis_dir = os.path.join(results_dir, "analysis")
+
+    records = load_records_from_csv(metrics_csv_path)
+    artifacts = generate_analysis_artifacts(records, analysis_dir)
+
+    print("=" * 50)
+    print(" 实验一分析完成 ")
+    print("=" * 50)
+    print(f" 指标文件: {metrics_csv_path}")
+    print(f" 摘要文件: {artifacts['summary_path']}")
+    print(f" 图表目录: {artifacts['output_dir']}")
+    print("=" * 50)
+
+
+if __name__ == "__main__":
+    main()
