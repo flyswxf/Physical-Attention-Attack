@@ -4,59 +4,37 @@ import os
 from statistics import mean, median
 
 from src.utils.plots import plot_metric_boxplot, plot_metric_scatter
-from src.utils.records import load_records_from_csv
+from src.utils.records import NUMERIC_FIELDS, load_records_from_csv
 
 
-# NUMERIC_FIELDS 中各字段的含义:
-# - image_width / image_height: 攻击图像尺寸。
-# - bbox_left / bbox_top / bbox_right / bbox_bottom: 注入文字区域的像素级边界框。
-# - cross_bbox_attention_sum: 交叉注意力中，分配到文字区域的总注意力质量。
-# - cross_bbox_attention_ratio: 交叉注意力中，文字区域注意力占整图总注意力的比例。
-# - cross_bbox_mean_attention: 交叉注意力中，文字区域内部的平均注意力强度。
-# - cross_bbox_patch_coverage: 文字区域在交叉注意力 patch 网格上的覆盖面积。
-# - vision_bbox_attention_sum: 视觉自注意力中，分配到文字区域的总注意力质量。
-# - vision_bbox_attention_ratio: 视觉自注意力中，文字区域注意力占整图总注意力的比例。
-# - vision_bbox_mean_attention: 视觉自注意力中，文字区域内部的平均注意力强度。
-# - vision_bbox_patch_coverage: 文字区域在视觉注意力 patch 网格上的覆盖面积。
-NUMERIC_FIELDS = {
-    "image_width",
-    "image_height",
-    "bbox_left",
-    "bbox_top",
-    "bbox_right",
-    "bbox_bottom",
-    "cross_bbox_attention_sum",
-    "cross_bbox_attention_ratio",
-    "cross_bbox_mean_attention",
-    "cross_bbox_patch_coverage",
-    "vision_bbox_attention_sum",
-    "vision_bbox_attention_ratio",
-    "vision_bbox_mean_attention",
-    "vision_bbox_patch_coverage",
-}
-
-def _collect_metric_values(records, metric_key, status):
+def _collect_metric_values(records, metric_key, group_key, group_value):
     values = []
     for record in records:
-        if record.get("status") != status:
+        if record.get(group_key) != group_value:
             continue
         values.append(float(record[metric_key]))
     return values
 
 
-def summarize_records(records):
+def summarize_records(records, group_key="status"):
     """
-    生成按成功/失败分组的指标摘要。
+    生成按指定维度分组的指标摘要。
     """
+    if not records:
+        raise ValueError("records 不能为空。")
+    if group_key not in records[0]:
+        raise KeyError(f"记录中不存在分组字段: {group_key}")
+
     summary = {
         "sample_count": len(records),
-        "status_counts": {},
+        "group_key": group_key,
+        "group_counts": {},
         "metrics": {},
     }
-    statuses = sorted({record.get("status", "UNKNOWN") for record in records})
-    for status in statuses:
-        summary["status_counts"][status] = sum(
-            1 for record in records if record.get("status") == status
+    group_values = sorted({record[group_key] for record in records})
+    for group_value in group_values:
+        summary["group_counts"][group_value] = sum(
+            1 for record in records if record[group_key] == group_value
         )
 
     metric_keys = [
@@ -67,12 +45,15 @@ def summarize_records(records):
     ]
     for metric_key in metric_keys:
         summary["metrics"][metric_key] = {}
-        for status in statuses:
-            values = _collect_metric_values(records, metric_key, status)
+        for group_value in group_values:
+            values = _collect_metric_values(records, metric_key, group_key, group_value)
             if not values:
-                raise ValueError(f"指标缺失: metric_key={metric_key}, status={status}")
+                raise ValueError(
+                    f"指标缺失: metric_key={metric_key}, "
+                    f"group_key={group_key}, group_value={group_value}"
+                )
 
-            summary["metrics"][metric_key][status] = {
+            summary["metrics"][metric_key][group_value] = {
                 "count": len(values),
                 "mean": mean(values),
                 "median": median(values),
@@ -81,44 +62,52 @@ def summarize_records(records):
     return summary
 
 
-def generate_analysis_artifacts(records, output_dir):
+def generate_analysis_artifacts(records, output_dir, group_key="status"):
     """
     基于结构化记录生成摘要与图表。
+
+    group_key 用于指定按哪个维度汇总，例如:
+    - status: 比较攻击成功与失败
+    - patch: 比较加 patch 与不加 patch
     """
     os.makedirs(output_dir, exist_ok=True)
-    summary = summarize_records(records)
+    summary = summarize_records(records, group_key=group_key)
 
-    summary_path = os.path.join(output_dir, "attention_summary.json")
+    summary_path = os.path.join(output_dir, f"attention_summary_by_{group_key}.json")
     with open(summary_path, "w", encoding="utf-8") as json_file:
         json.dump(summary, json_file, ensure_ascii=False, indent=4)
 
     plot_metric_boxplot(
         records,
         "cross_bbox_attention_ratio",
-        os.path.join(output_dir, "cross_attention_ratio_boxplot.png"),
-        title="Cross Attention Ratio in Text Region",
+        os.path.join(output_dir, f"cross_attention_ratio_boxplot_by_{group_key}.png"),
+        title=f"Cross Attention Ratio Grouped by {group_key}",
         ylabel="Attention Ratio",
+        group_key=group_key,
     )
     plot_metric_boxplot(
         records,
         "vision_bbox_attention_ratio",
-        os.path.join(output_dir, "vision_attention_ratio_boxplot.png"),
-        title="Vision Attention Ratio in Text Region",
+        os.path.join(output_dir, f"vision_attention_ratio_boxplot_by_{group_key}.png"),
+        title=f"Vision Attention Ratio Grouped by {group_key}",
         ylabel="Attention Ratio",
+        group_key=group_key,
     )
     plot_metric_boxplot(
         records,
         "cross_bbox_mean_attention",
-        os.path.join(output_dir, "cross_mean_attention_boxplot.png"),
-        title="Cross Mean Attention in Text Region",
+        os.path.join(output_dir, f"cross_mean_attention_boxplot_by_{group_key}.png"),
+        title=f"Cross Mean Attention Grouped by {group_key}",
         ylabel="Attention Strength",
+        group_key=group_key,
     )
     plot_metric_boxplot(
         records,
         "vision_bbox_mean_attention",
-        os.path.join(output_dir, "vision_mean_attention_boxplot.png"),
-        title="Vision Mean Attention in Text Region",
+        os.path.join(output_dir, f"vision_mean_attention_boxplot_by_{group_key}.png"),
+        title=f"Vision Mean Attention Grouped by {group_key}",
         ylabel="Attention Strength",
+        group_key=group_key,
     )
 
     return {
@@ -137,6 +126,12 @@ def parse_args():
         default=None,
         help="实验一结果目录，默认使用 data/results/exp1",
     )
+    parser.add_argument(
+        "--group_key",
+        type=str,
+        default="status",
+        help="分析分组维度，例如 status 或 patch",
+    )
     return parser.parse_args()
 
 
@@ -145,14 +140,19 @@ def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     results_dir = args.results_dir or os.path.join(base_dir, "data", "results", "exp1")
     metrics_csv_path = os.path.join(results_dir, "attention_metrics.csv")
-    analysis_dir = os.path.join(results_dir, "analysis")
+    analysis_dir = os.path.join(results_dir, f"analysis_by_{args.group_key}")
 
     records = load_records_from_csv(metrics_csv_path)
-    artifacts = generate_analysis_artifacts(records, analysis_dir)
+    artifacts = generate_analysis_artifacts(
+        records,
+        analysis_dir,
+        group_key=args.group_key,
+    )
 
     print("=" * 50)
     print(" 实验一分析完成 ")
     print("=" * 50)
+    print(f" 分组维度: {args.group_key}")
     print(f" 指标文件: {metrics_csv_path}")
     print(f" 摘要文件: {artifacts['summary_path']}")
     print(f" 图表目录: {artifacts['output_dir']}")

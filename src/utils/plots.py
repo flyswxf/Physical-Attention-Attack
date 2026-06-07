@@ -116,9 +116,10 @@ def plot_metric_scatter(
     """
     绘制两个指标之间的散点关系图。
     """
+    group_names = sorted({record.get(group_key, "UNKNOWN") for record in records})
+    color_values = plt.cm.tab10(np.linspace(0, 1, max(len(group_names), 1)))
     colors = {
-        "SUCCESS": "#2ca02c",
-        "FAIL": "#d62728",
+        group_name: color_values[index] for index, group_name in enumerate(group_names)
     }
 
     plt.figure(figsize=(8, 6))

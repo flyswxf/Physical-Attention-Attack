@@ -117,6 +117,8 @@ def build_attention_record(
     image_size,
     cross_attention_raw,
     vision_attention_raw,
+    patch,
+    patch_type,
 ):
     """
     组装单个样本的结构化分析记录。
@@ -138,6 +140,8 @@ def build_attention_record(
     record = {
         "image": image_name,
         "status": status,
+        "patch": patch,
+        "patch_type": patch_type,
         "response": response,
         "image_width": image_width,
         "image_height": image_height,
