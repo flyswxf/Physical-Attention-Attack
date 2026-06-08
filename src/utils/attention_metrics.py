@@ -137,7 +137,9 @@ def build_attention_record(
     image_name,
     status,
     response,
-    bbox,
+    text_bbox,
+    patch_bbox,
+    expanded_bbox,
     image_size,
     cross_attention_raw,
     vision_attention_raw,
@@ -152,7 +154,10 @@ def build_attention_record(
     - image_name (str): 图片文件名。
     - status (str): 攻击结果标签，例如 `"SUCCESS"` 或 `"FAIL"`。
     - response (str): 模型生成的响应文本。
-    - bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框。
+    - text_bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框。
+    - patch_bbox (tuple[int | float, int | float, int | float, int | float]): patch 区域边界框。
+    - expanded_bbox (tuple[int | float, int | float, int | float, int | float]): 文字与 patch
+      外围更大邻域的边界框。
     - image_size (tuple[int, int]): 图像尺寸，格式为 `(width, height)`。
     - cross_attention_raw (array-like): 原始交叉注意力图。
     - vision_attention_raw (array-like): 原始视觉自注意力图。
@@ -162,19 +167,15 @@ def build_attention_record(
     返回值:
     - dict[str, int | float | str]: 单个样本的结构化分析记录。
     """
-    bbox_values = [int(round(value)) for value in bbox]
+    text_bbox_values = [int(round(value)) for value in text_bbox]
+    patch_bbox_values = [int(round(value)) for value in patch_bbox]
+    expanded_bbox_values = [int(round(value)) for value in expanded_bbox]
     image_width, image_height = image_size
-
-    cross_metrics = compute_attention_metrics(
-        cross_attention_raw,
-        bbox,
-        image_size,
-    )
-    vision_metrics = compute_attention_metrics(
-        vision_attention_raw,
-        bbox,
-        image_size,
-    )
+    region_bboxes = {
+        "bbox": text_bbox,
+        "patch_bbox": patch_bbox,
+        "expanded_bbox": expanded_bbox,
+    }
 
     record = {
         "image": image_name,
@@ -184,26 +185,55 @@ def build_attention_record(
         "response": response,
         "image_width": image_width,
         "image_height": image_height,
-        "bbox_left": bbox_values[0],
-        "bbox_top": bbox_values[1],
-        "bbox_right": bbox_values[2],
-        "bbox_bottom": bbox_values[3],
+        "bbox_left": text_bbox_values[0],
+        "bbox_top": text_bbox_values[1],
+        "bbox_right": text_bbox_values[2],
+        "bbox_bottom": text_bbox_values[3],
+        "patch_bbox_left": patch_bbox_values[0],
+        "patch_bbox_top": patch_bbox_values[1],
+        "patch_bbox_right": patch_bbox_values[2],
+        "patch_bbox_bottom": patch_bbox_values[3],
+        "expanded_bbox_left": expanded_bbox_values[0],
+        "expanded_bbox_top": expanded_bbox_values[1],
+        "expanded_bbox_right": expanded_bbox_values[2],
+        "expanded_bbox_bottom": expanded_bbox_values[3],
     }
 
-    # 两类注意力使用统一前缀写回记录，便于后续直接导出到 CSV/JSON。
-    for prefix, metrics in (
-        ("cross", cross_metrics),
-        ("vision", vision_metrics),
+    # 对文字框、patch 框和更大邻域分别计算两类注意力指标，便于后续定位
+    # “注意力到了文字上”还是“只到了文字附近/红框上”。
+    for attention_prefix, attention_map in (
+        ("cross", cross_attention_raw),
+        ("vision", vision_attention_raw),
     ):
-        record[f"{prefix}_bbox_attention_sum"] = metrics["bbox_attention_sum"]
-        record[f"{prefix}_bbox_attention_ratio"] = metrics["bbox_attention_ratio"]
-        record[f"{prefix}_bbox_mean_attention"] = metrics["bbox_mean_attention"]
-        record[f"{prefix}_bbox_patch_coverage"] = metrics["bbox_patch_coverage"]
+        for region_name, region_bbox in region_bboxes.items():
+            metrics = compute_attention_metrics(
+                attention_map,
+                region_bbox,
+                image_size,
+            )
+            record[f"{attention_prefix}_{region_name}_attention_sum"] = metrics[
+                "bbox_attention_sum"
+            ]
+            record[f"{attention_prefix}_{region_name}_attention_ratio"] = metrics[
+                "bbox_attention_ratio"
+            ]
+            record[f"{attention_prefix}_{region_name}_mean_attention"] = metrics[
+                "bbox_mean_attention"
+            ]
+            record[f"{attention_prefix}_{region_name}_patch_coverage"] = metrics[
+                "bbox_patch_coverage"
+            ]
 
     return record
 
 
-def save_attention_arrays(output_path, bbox, attention_payload):
+def save_attention_arrays(
+    output_path,
+    bbox,
+    attention_payload,
+    patch_bbox=None,
+    expanded_bbox=None,
+):
     """
     功能描述:
     - 将原始注意力图与文字边界框保存为压缩的 `npz` 文件，便于复现实验分析。
@@ -213,6 +243,10 @@ def save_attention_arrays(output_path, bbox, attention_payload):
     - bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框。
     - attention_payload (dict[str, array-like]): 至少包含 `cross_attention_raw` 与
       `vision_attention_raw` 两个字段的注意力数据字典。
+    - patch_bbox (tuple[int | float, int | float, int | float, int | float] | None):
+      patch 区域边界框。
+    - expanded_bbox (tuple[int | float, int | float, int | float, int | float] | None):
+      更大邻域边界框。
 
     返回值:
     - None: 函数直接将结果保存到磁盘。
@@ -224,6 +258,16 @@ def save_attention_arrays(output_path, bbox, attention_payload):
     np.savez_compressed(
         output_path,
         bbox=bbox_array,
+        patch_bbox=(
+            np.asarray(patch_bbox, dtype=np.int32)
+            if patch_bbox is not None
+            else np.asarray([], dtype=np.int32)
+        ),
+        expanded_bbox=(
+            np.asarray(expanded_bbox, dtype=np.int32)
+            if expanded_bbox is not None
+            else np.asarray([], dtype=np.int32)
+        ),
         cross_attention_raw=sanitize_attention_map(
             attention_payload["cross_attention_raw"]
         ),

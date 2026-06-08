@@ -4,7 +4,7 @@ import json
 from tqdm import tqdm
 
 from exp1_analysis import generate_analysis_artifacts
-from src.image_utils import add_attention_patch, inject_text_to_image
+from src.image_utils import add_attention_patch, expand_bbox, inject_text_to_image
 from src.models.model_utils import get_model
 from src.utils.attention_metrics import build_attention_record, save_attention_arrays
 from src.utils.records import save_records_to_csv
@@ -61,6 +61,18 @@ def parse_args():
         type=str,
         default="red_box",
         help="实验二中使用的 patch 类型",
+    )
+    parser.add_argument(
+        "--patch_padding",
+        type=int,
+        default=10,
+        help="patch bbox 相对文字框向外扩展的像素数",
+    )
+    parser.add_argument(
+        "--expanded_bbox_padding",
+        type=int,
+        default=20,
+        help="expanded bbox 相对 patch bbox 继续向外扩展的像素数",
     )
     return parser.parse_args()
 
@@ -137,6 +149,8 @@ def main():
     prompt = args.prompt
     target_word = args.target_word
     patch_type = args.patch_type
+    patch_padding = args.patch_padding
+    expanded_bbox_padding = args.expanded_bbox_padding
 
     success_count = 0
     results_log = []  # 用于保存实验详情
@@ -169,11 +183,22 @@ def main():
             font_dir=font_dir,
         )
 
+        # 为两种实验条件统一生成 patch bbox 和更大邻域 bbox。
+        # 即使 NO_PATCH 条件下没有真正绘制红框，也会统计相同几何区域内的注意力，
+        # 这样才便于做配对比较。
+        patch_bbox = expand_bbox(text_bbox, patch_padding, base_attack_image.size)
+        expanded_bbox = expand_bbox(
+            patch_bbox,
+            expanded_bbox_padding,
+            base_attack_image.size,
+        )
+
         patched_attack_image, _ = add_attention_patch(
             base_attack_image,
             text_bbox,
             patch_type=patch_type,
             output_path=with_patch_attack_path,
+            padding=patch_padding,
         )
 
         # 同一底图分别跑无 patch 和有 patch 两个条件，保证后续分组分析可直接对比。
@@ -232,7 +257,9 @@ def main():
                 image_name=filename,
                 status=status_str,
                 response=response,
-                bbox=text_bbox,
+                text_bbox=text_bbox,
+                patch_bbox=patch_bbox,
+                expanded_bbox=expanded_bbox,
                 image_size=variant["attack_image"].size,
                 cross_attention_raw=attention_dict["cross_attention_raw"],
                 vision_attention_raw=attention_dict["vision_attention_raw"],
@@ -246,7 +273,13 @@ def main():
                 patch.lower(),
                 f"{name}_attention.npz",
             )
-            save_attention_arrays(attention_array_path, text_bbox, attention_dict)
+            save_attention_arrays(
+                attention_array_path,
+                text_bbox,
+                attention_dict,
+                patch_bbox=patch_bbox,
+                expanded_bbox=expanded_bbox,
+            )
 
             # 分别绘制并保存两种热力图
             plot_attention_heatmap(

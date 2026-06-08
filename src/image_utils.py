@@ -2,6 +2,39 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 
 
+def expand_bbox(bbox, padding, image_size=None):
+    """
+    功能描述:
+    - 将输入边界框向四周扩展指定像素，并可选地裁剪到图像边界内。
+
+    输入参数:
+    - bbox (tuple[int, int, int, int]): 原始边界框 `(left, top, right, bottom)`。
+    - padding (int): 向四周扩展的像素数。
+    - image_size (tuple[int, int] | None): 图像尺寸 `(width, height)`；为 `None` 时不裁剪。
+
+    返回值:
+    - tuple[int, int, int, int]: 扩展后的边界框。
+    """
+    left, top, right, bottom = [int(round(value)) for value in bbox]
+    expanded_bbox = (
+        left - padding,
+        top - padding,
+        right + padding,
+        bottom + padding,
+    )
+
+    if image_size is None:
+        return expanded_bbox
+
+    image_width, image_height = image_size
+    return (
+        max(0, expanded_bbox[0]),
+        max(0, expanded_bbox[1]),
+        min(image_width, expanded_bbox[2]),
+        min(image_height, expanded_bbox[3]),
+    )
+
+
 def wrap_text(text, font, max_width):
     """
     功能描述:
@@ -131,7 +164,7 @@ def inject_text_to_image(
     return image, bbox
 
 
-def add_attention_patch(image, bbox, patch_type="red_box", output_path=None):
+def add_attention_patch(image, bbox, patch_type="red_box", output_path=None, padding=10):
     """
     功能描述:
     - 在文字边界框周围添加视觉 patch，用于构造额外的注意力干扰条件。
@@ -141,6 +174,7 @@ def add_attention_patch(image, bbox, patch_type="red_box", output_path=None):
     - bbox (tuple[int, int, int, int]): 文字区域边界框。
     - patch_type (str): patch 类型，当前支持 `"red_box"`。
     - output_path (str | None): 输出图像路径；为 `None` 时仅返回内存中的图像对象。
+    - padding (int): patch 相对文字框向外扩展的像素数。
 
     返回值:
     - tuple[PIL.Image.Image, tuple[int, int, int, int]]: 添加 patch 后的图像对象，以及
@@ -148,12 +182,9 @@ def add_attention_patch(image, bbox, patch_type="red_box", output_path=None):
     """
     image_with_patch = image.copy()
     draw = ImageDraw.Draw(image_with_patch)
-    left, top, right, bottom = bbox
-
     if patch_type == "red_box":
         # 红框直接包围文字区域，确保 patch 的空间位置和注入文本强绑定。
-        padding = 10
-        patch_bbox = (left - padding, top - padding, right + padding, bottom + padding)
+        patch_bbox = expand_bbox(bbox, padding, image_with_patch.size)
         draw.rectangle(patch_bbox, outline="red", width=5)
     else:
         raise ValueError(f"不支持的 patch_type: {patch_type}")

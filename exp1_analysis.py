@@ -4,7 +4,47 @@ import os
 from statistics import mean, median
 
 from src.utils.plots import plot_metric_boxplot
-from src.utils.records import load_records_from_csv
+from src.utils.records import REGION_NAMES, load_records_from_csv
+
+REGION_LABELS = {
+    "bbox": "Text BBox",
+    "patch_bbox": "Patch BBox",
+    "expanded_bbox": "Expanded BBox",
+}
+ATTENTION_TYPE_LABELS = {
+    "cross": "Cross Attention",
+    "vision": "Vision Attention",
+}
+METRIC_TYPE_LABELS = {
+    "attention_ratio": "Attention Ratio",
+    "mean_attention": "Mean Attention",
+}
+
+
+def _build_metric_specs():
+    """
+    功能描述:
+    - 生成需要参与摘要统计和绘图的指标规格列表。
+
+    输入参数:
+    - 无。
+
+    返回值:
+    - list[dict[str, str]]: 每个元素描述一个指标字段及其元信息。
+    """
+    metric_specs = []
+    for region_name in REGION_NAMES:
+        for attention_type in ("cross", "vision"):
+            for metric_type in ("attention_ratio", "mean_attention"):
+                metric_specs.append(
+                    {
+                        "key": f"{attention_type}_{region_name}_{metric_type}",
+                        "region_name": region_name,
+                        "attention_type": attention_type,
+                        "metric_type": metric_type,
+                    }
+                )
+    return metric_specs
 
 
 def _collect_metric_values(records, metric_key, group_key, group_value):
@@ -50,7 +90,7 @@ def summarize_records(records, group_key="status"):
         "sample_count": len(records),
         "group_key": group_key,
         "group_counts": {},
-        "metrics": {},
+        "regions": {},
     }
     group_values = sorted({record[group_key] for record in records})
     for group_value in group_values:
@@ -58,14 +98,27 @@ def summarize_records(records, group_key="status"):
             1 for record in records if record[group_key] == group_value
         )
 
-    metric_keys = [
-        "cross_bbox_attention_ratio",
-        "cross_bbox_mean_attention",
-        "vision_bbox_attention_ratio",
-        "vision_bbox_mean_attention",
-    ]
-    for metric_key in metric_keys:
-        summary["metrics"][metric_key] = {}
+    metric_specs = _build_metric_specs()
+    for region_name in REGION_NAMES:
+        summary["regions"][region_name] = {
+            "label": REGION_LABELS[region_name],
+            "metrics": {},
+        }
+
+    for metric_spec in metric_specs:
+        metric_key = metric_spec["key"]
+        region_name = metric_spec["region_name"]
+        attention_type = metric_spec["attention_type"]
+        metric_type = metric_spec["metric_type"]
+        grouped_metric_name = f"{attention_type}_{metric_type}"
+        summary["regions"][region_name]["metrics"][grouped_metric_name] = {
+            "label": (
+                f"{ATTENTION_TYPE_LABELS[attention_type]} "
+                f"{METRIC_TYPE_LABELS[metric_type]}"
+            ),
+            "field": metric_key,
+            "groups": {},
+        }
         for group_value in group_values:
             # 每个分组都要求有完整的指标值，避免后续均值和中位数统计失真。
             values = _collect_metric_values(records, metric_key, group_key, group_value)
@@ -75,7 +128,9 @@ def summarize_records(records, group_key="status"):
                     f"group_key={group_key}, group_value={group_value}"
                 )
 
-            summary["metrics"][metric_key][group_value] = {
+            summary["regions"][region_name]["metrics"][grouped_metric_name]["groups"][
+                group_value
+            ] = {
                 "count": len(values),
                 "mean": mean(values),
                 "median": median(values),
@@ -104,38 +159,49 @@ def generate_analysis_artifacts(records, output_dir, group_key="status"):
     with open(summary_path, "w", encoding="utf-8") as json_file:
         json.dump(summary, json_file, ensure_ascii=False, indent=4)
 
-    plot_metric_boxplot(
-        records,
-        "cross_bbox_attention_ratio",
-        os.path.join(output_dir, f"cross_attention_ratio_boxplot_by_{group_key}.png"),
-        title=f"Cross Attention Ratio Grouped by {group_key}",
-        ylabel="Attention Ratio",
-        group_key=group_key,
-    )
-    plot_metric_boxplot(
-        records,
-        "vision_bbox_attention_ratio",
-        os.path.join(output_dir, f"vision_attention_ratio_boxplot_by_{group_key}.png"),
-        title=f"Vision Attention Ratio Grouped by {group_key}",
-        ylabel="Attention Ratio",
-        group_key=group_key,
-    )
-    plot_metric_boxplot(
-        records,
-        "cross_bbox_mean_attention",
-        os.path.join(output_dir, f"cross_mean_attention_boxplot_by_{group_key}.png"),
-        title=f"Cross Mean Attention Grouped by {group_key}",
-        ylabel="Attention Strength",
-        group_key=group_key,
-    )
-    plot_metric_boxplot(
-        records,
-        "vision_bbox_mean_attention",
-        os.path.join(output_dir, f"vision_mean_attention_boxplot_by_{group_key}.png"),
-        title=f"Vision Mean Attention Grouped by {group_key}",
-        ylabel="Attention Strength",
-        group_key=group_key,
-    )
+    for region_name in REGION_NAMES:
+        region_label = REGION_LABELS[region_name]
+        region_output_dir = os.path.join(output_dir, region_name)
+        os.makedirs(region_output_dir, exist_ok=True)
+        plot_metric_boxplot(
+            records,
+            f"cross_{region_name}_attention_ratio",
+            os.path.join(
+                region_output_dir, f"cross_attention_ratio_by_{group_key}.png"
+            ),
+            title=f"{region_label}: Cross Attention Ratio by {group_key}",
+            ylabel="Attention Ratio",
+            group_key=group_key,
+        )
+        plot_metric_boxplot(
+            records,
+            f"vision_{region_name}_attention_ratio",
+            os.path.join(
+                region_output_dir,
+                f"vision_attention_ratio_by_{group_key}.png",
+            ),
+            title=f"{region_label}: Vision Attention Ratio by {group_key}",
+            ylabel="Attention Ratio",
+            group_key=group_key,
+        )
+        plot_metric_boxplot(
+            records,
+            f"cross_{region_name}_mean_attention",
+            os.path.join(region_output_dir, f"cross_mean_attention_by_{group_key}.png"),
+            title=f"{region_label}: Cross Mean Attention by {group_key}",
+            ylabel="Attention Strength",
+            group_key=group_key,
+        )
+        plot_metric_boxplot(
+            records,
+            f"vision_{region_name}_mean_attention",
+            os.path.join(
+                region_output_dir, f"vision_mean_attention_by_{group_key}.png"
+            ),
+            title=f"{region_label}: Vision Mean Attention by {group_key}",
+            ylabel="Attention Strength",
+            group_key=group_key,
+        )
 
     return {
         "summary_path": summary_path,
