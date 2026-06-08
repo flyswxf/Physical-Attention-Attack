@@ -1,12 +1,19 @@
 from PIL import Image, ImageDraw, ImageFont
 import os
-import textwrap
 
 
 def wrap_text(text, font, max_width):
     """
-    根据字体和最大宽度，将长文本自动折行。
-    如果文本本身包含 '\n'，也会保留其原本的换行。
+    功能描述:
+    - 根据字体宽度和最大像素宽度对文本进行自动折行，并保留原始换行结构。
+
+    输入参数:
+    - text (str): 待绘制的文本内容。
+    - font (PIL.ImageFont.ImageFont): 用于测量文本宽度的字体对象。
+    - max_width (int): 每行允许的最大像素宽度。
+
+    返回值:
+    - str: 处理后的多行文本字符串。
     """
     lines = []
     # 首先处理用户自己传入的换行符
@@ -46,6 +53,28 @@ def wrap_text(text, font, max_width):
     return "\n".join(lines)
 
 
+def _load_font(font_dir, font_size):
+    """
+    功能描述:
+    - 根据字体目录和字号加载实验使用的字体；若未提供有效字体文件，则退回默认字体。
+
+    输入参数:
+    - font_dir (str | None): 字体目录路径；为 `None` 时直接使用默认字体。
+    - font_size (int): 字体大小。
+
+    返回值:
+    - PIL.ImageFont.ImageFont: 可直接用于绘制文本的字体对象。
+    """
+    if not font_dir:
+        return ImageFont.load_default()
+
+    font_path = os.path.join(font_dir, "TimesNewRoman-BoldItalic_mianfeiziti.com.otf")
+    if not os.path.isfile(font_path):
+        return ImageFont.load_default()
+
+    return ImageFont.truetype(font_path, font_size)
+
+
 def inject_text_to_image(
     image_path,
     text,
@@ -56,23 +85,25 @@ def inject_text_to_image(
     font_dir=None,
 ):
     """
-    在图片中注入文字，模拟物理世界的文本攻击
-    返回: 带有文字的PIL Image对象, 以及文字的Bounding Box (left, top, right, bottom)
+    功能描述:
+    - 在输入图像上绘制攻击文本，并返回带文字的图像与文字区域边界框。
+
+    输入参数:
+    - image_path (str): 原始图像路径。
+    - text (str): 需要注入的攻击文本。
+    - output_path (str | None): 输出图像路径；为 `None` 时仅返回内存中的图像对象。
+    - position (tuple[int, int]): 文本绘制起点坐标，格式为 `(x, y)`。
+    - font_size (int): 文本字号。
+    - color (str | tuple[int, int, int]): 文本颜色。
+    - font_dir (str | None): 字体目录路径。
+
+    返回值:
+    - tuple[PIL.Image.Image, tuple[int, int, int, int]]: 带文字的图像对象，以及文字块
+      的边界框 `(left, top, right, bottom)`。
     """
     image = Image.open(image_path).convert("RGB")
     draw = ImageDraw.Draw(image)
-
-    # 尝试加载字体目录下的字体
-    if font_dir:
-        font_path = os.path.join(
-            font_dir, "TimesNewRoman-BoldItalic_mianfeiziti.com.otf"
-        )
-        try:
-            font = ImageFont.truetype(font_path, font_size)
-        except IOError:
-            font = ImageFont.load_default()
-    else:
-        font = ImageFont.load_default()
+    font = _load_font(font_dir, font_size)
 
     # 计算文本允许的最大宽度 (图片宽度 - 起始x坐标 - 右侧边距)
     # 假设右侧留白至少为 50 像素
@@ -92,24 +123,35 @@ def inject_text_to_image(
 
     # 如果指定了输出路径，则保存图片
     if output_path:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         image.save(output_path)
-        # print(f"Attack image saved to: {output_path}")
 
     return image, bbox
 
 
 def add_attention_patch(image, bbox, patch_type="red_box", output_path=None):
     """
-    在文字周围添加一个Patch，以试图吸引模型的注意力 (实验二的预留功能)
-    返回: 带有Patch的PIL Image对象, 以及Patch的Bounding Box (left, top, right, bottom)
+    功能描述:
+    - 在文字边界框周围添加视觉 patch，用于构造额外的注意力干扰条件。
+
+    输入参数:
+    - image (PIL.Image.Image): 已注入文字的图像对象。
+    - bbox (tuple[int, int, int, int]): 文字区域边界框。
+    - patch_type (str): patch 类型，当前支持 `"red_box"`。
+    - output_path (str | None): 输出图像路径；为 `None` 时仅返回内存中的图像对象。
+
+    返回值:
+    - tuple[PIL.Image.Image, tuple[int, int, int, int]]: 添加 patch 后的图像对象，以及
+      patch 的边界框 `(left, top, right, bottom)`。
     """
     image_with_patch = image.copy()
     draw = ImageDraw.Draw(image_with_patch)
     left, top, right, bottom = bbox
 
     if patch_type == "red_box":
-        # 在文字外围画一个醒目的红色粗框作为 Patch
+        # 红框直接包围文字区域，确保 patch 的空间位置和注入文本强绑定。
         padding = 10
         patch_bbox = (left - padding, top - padding, right + padding, bottom + padding)
         draw.rectangle(patch_bbox, outline="red", width=5)
@@ -117,7 +159,9 @@ def add_attention_patch(image, bbox, patch_type="red_box", output_path=None):
         raise ValueError(f"不支持的 patch_type: {patch_type}")
 
     if output_path:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         image_with_patch.save(output_path)
 
     return image_with_patch, patch_bbox

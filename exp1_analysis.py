@@ -3,11 +3,24 @@ import json
 import os
 from statistics import mean, median
 
-from src.utils.plots import plot_metric_boxplot, plot_metric_scatter
-from src.utils.records import NUMERIC_FIELDS, load_records_from_csv
+from src.utils.plots import plot_metric_boxplot
+from src.utils.records import load_records_from_csv
 
 
 def _collect_metric_values(records, metric_key, group_key, group_value):
+    """
+    功能描述:
+    - 从结构化记录中筛选指定分组对应的某个指标值列表。
+
+    输入参数:
+    - records (list[dict]): 结构化实验记录列表。
+    - metric_key (str): 目标指标字段名。
+    - group_key (str): 分组字段名。
+    - group_value (str): 当前需要筛选的分组取值。
+
+    返回值:
+    - list[float]: 当前分组下该指标的数值列表。
+    """
     values = []
     for record in records:
         if record.get(group_key) != group_value:
@@ -18,7 +31,15 @@ def _collect_metric_values(records, metric_key, group_key, group_value):
 
 def summarize_records(records, group_key="status"):
     """
-    生成按指定维度分组的指标摘要。
+    功能描述:
+    - 按给定分组维度统计核心注意力指标，并生成均值、中位数等摘要信息。
+
+    输入参数:
+    - records (list[dict]): 结构化实验记录列表。
+    - group_key (str): 分组字段名，默认值为 `"status"`。
+
+    返回值:
+    - dict: 按分组组织的样本数与指标摘要结果。
     """
     if not records:
         raise ValueError("records 不能为空。")
@@ -46,6 +67,7 @@ def summarize_records(records, group_key="status"):
     for metric_key in metric_keys:
         summary["metrics"][metric_key] = {}
         for group_value in group_values:
+            # 每个分组都要求有完整的指标值，避免后续均值和中位数统计失真。
             values = _collect_metric_values(records, metric_key, group_key, group_value)
             if not values:
                 raise ValueError(
@@ -64,11 +86,16 @@ def summarize_records(records, group_key="status"):
 
 def generate_analysis_artifacts(records, output_dir, group_key="status"):
     """
-    基于结构化记录生成摘要与图表。
+    功能描述:
+    - 基于结构化实验记录生成 JSON 摘要和分组箱线图。
 
-    group_key 用于指定按哪个维度汇总，例如:
-    - status: 比较攻击成功与失败
-    - patch: 比较加 patch 与不加 patch
+    输入参数:
+    - records (list[dict]): 结构化实验记录列表。
+    - output_dir (str): 分析产物输出目录。
+    - group_key (str): 分组字段名，例如 `"status"` 或 `"patch"`。
+
+    返回值:
+    - dict[str, str]: 包含摘要文件路径和输出目录的结果字典。
     """
     os.makedirs(output_dir, exist_ok=True)
     summary = summarize_records(records, group_key=group_key)
@@ -117,6 +144,16 @@ def generate_analysis_artifacts(records, output_dir, group_key="status"):
 
 
 def parse_args():
+    """
+    功能描述:
+    - 解析实验一分析脚本的命令行参数。
+
+    输入参数:
+    - 无。
+
+    返回值:
+    - argparse.Namespace: 解析后的命令行参数对象。
+    """
     parser = argparse.ArgumentParser(
         description="Analyze structured attention metrics from experiment 1"
     )
@@ -136,6 +173,16 @@ def parse_args():
 
 
 def main():
+    """
+    功能描述:
+    - 读取实验一生成的结构化记录，并输出指定分组维度下的摘要与图表。
+
+    输入参数:
+    - 无。
+
+    返回值:
+    - None: 函数执行完成后直接打印结果路径。
+    """
     args = parse_args()
     base_dir = os.path.dirname(os.path.abspath(__file__))
     results_dir = args.results_dir or os.path.join(base_dir, "data", "results", "exp1")

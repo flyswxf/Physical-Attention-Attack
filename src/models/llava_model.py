@@ -5,13 +5,32 @@ from ..utils.attention_metrics import normalize_attention_for_visualization
 
 
 class LLaVAModel(BaseModel):
+    """LLaVA 模型封装，负责模型加载、推理以及注意力提取。"""
+
     def __init__(self, model_id="llava-hf/llava-1.5-7b-hf", device="cuda"):
+        """
+        功能描述:
+        - 初始化 LLaVA 模型封装对象，并设置默认模型 ID 与运行设备。
+
+        输入参数:
+        - model_id (str): Hugging Face 模型 ID 或本地模型路径。
+        - device (str): 期望使用的运行设备，默认值为 `"cuda"`。
+
+        返回值:
+        - None: 构造函数仅初始化对象状态。
+        """
         super().__init__(model_id, device)
 
     def load_model(self):
         """
-        加载LLaVA模型和处理器 (如果本地显存不够，可改用较小的模型或量化加载)
-        由于这里需要提取注意力，所以加载完整的HuggingFace模型。
+        功能描述:
+        - 加载 LLaVA 模型与处理器，并配置为可输出注意力权重的推理模式。
+
+        输入参数:
+        - 无。
+
+        返回值:
+        - bool: `True` 表示模型和处理器已成功加载。
         """
         from transformers import AutoProcessor, LlavaForConditionalGeneration
 
@@ -35,7 +54,16 @@ class LLaVAModel(BaseModel):
 
     def run_inference_and_get_attention(self, image, prompt):
         """
-        运行推理并提取注意力权重
+        功能描述:
+        - 对单张图像执行 LLaVA 推理，并提取交叉注意力与视觉自注意力。
+
+        输入参数:
+        - image (PIL.Image.Image): 输入图像对象。
+        - prompt (str): 提供给模型的文本提示。
+
+        返回值:
+        - tuple[str, dict[str, numpy.ndarray]]: 第一个元素为解码后的模型输出文本，
+          第二个元素为包含原始注意力和可视化注意力的字典。
         """
         if self.model is None or self.processor is None:
             raise RuntimeError("模型或处理器未加载，无法执行推理。")
@@ -79,7 +107,7 @@ class LLaVAModel(BaseModel):
 
         image_start_idx = image_idx[0].item()
         all_image_attn = []
-        # 遍历每一步生成的 token 的 attention
+        # generate 返回的是按生成步组织的注意力，这里需要逐步抽取对应 token 对图片区域的注意力。
         for step_idx, step_attn in enumerate(outputs.attentions):
             # 取最后一层的 attention: shape (batch, heads, q_len, k_len)
             last_layer_attn = step_attn[-1]
@@ -133,7 +161,7 @@ class LLaVAModel(BaseModel):
         del last_layer_vision_attn
         del avg_vision_attn
 
-        # 将两种注意力打包返回
+        # 原始注意力用于定量分析，log+normalize 后的结果仅用于热力图可视化。
         attention_dict = {
             "cross_attention_raw": cross_attention_raw,
             "vision_attention_raw": vision_attention_raw,

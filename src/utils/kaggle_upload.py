@@ -17,7 +17,6 @@ import argparse
 import json
 import os
 import shutil
-import sys
 import tempfile
 import kagglehub
 
@@ -41,6 +40,18 @@ LICENSE_NAME = "MIT"
 
 
 def create_metadata_json(output_path, owner, dataset):
+    """
+    功能描述:
+    - 为 Kaggle 数据集上传生成 `dataset-metadata.json` 元数据文件。
+
+    输入参数:
+    - output_path (str): 元数据文件输出路径。
+    - owner (str): Kaggle 用户名。
+    - dataset (str): Kaggle 数据集名称。
+
+    返回值:
+    - None: 函数直接将元数据写入磁盘。
+    """
     metadata = {
         "title": DATASET_TITLE,
         "id": f"{owner}/{dataset}",
@@ -53,15 +64,24 @@ def create_metadata_json(output_path, owner, dataset):
 
 
 def validate_data_dir(dirs_to_include):
-    """检查 data 目录结构是否正确（仅校验需要上传的子目录）"""
+    """
+    功能描述:
+    - 校验上传所需的数据子目录是否存在，并打印每个目录中的文件数量。
+
+    输入参数:
+    - dirs_to_include (list[str]): 需要打包上传的 `data` 子目录名称列表。
+
+    返回值:
+    - None: 校验通过后仅打印目录统计信息。
+    """
     missing = []
     for d in dirs_to_include:
         if not os.path.isdir(os.path.join(DATA_DIR, d)):
             missing.append(d)
     if missing:
-        print(f"[ERROR] data 目录缺少以下子目录: {missing}")
-        print(f"       完整路径: {DATA_DIR}")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"data 目录缺少以下子目录: {missing}，完整路径: {DATA_DIR}"
+        )
 
     # 统计文件数
     for d in dirs_to_include:
@@ -73,16 +93,27 @@ def validate_data_dir(dirs_to_include):
 
 
 def upload(version_notes, owner, dataset, include_dirs=None):
-    """上传数据集到 Kaggle（首次创建，后续自动发布新版本）"""
+    """
+    功能描述:
+    - 将指定的数据目录复制到暂存区并上传到 Kaggle 数据集。
+
+    输入参数:
+    - version_notes (str): 本次上传的版本说明。
+    - owner (str): Kaggle 用户名。
+    - dataset (str): Kaggle 数据集名称。
+    - include_dirs (list[str] | None): 需要上传的 `data` 子目录列表；为 `None` 时使用默认配置。
+
+    返回值:
+    - None: 函数完成后直接打印 Kaggle 数据集链接。
+    """
     if include_dirs is None:
         include_dirs = INCLUDE_DIRS
 
     print("[INFO] 检查 data 目录...")
     validate_data_dir(include_dirs)
 
-    staging_dir = tempfile.mkdtemp(prefix="kaggle_staging_")
-    print(f"[INFO] 暂存目录: {staging_dir}")
-    try:
+    with tempfile.TemporaryDirectory(prefix="kaggle_staging_") as staging_dir:
+        print(f"[INFO] 暂存目录: {staging_dir}")
         for d in include_dirs:
             src = os.path.join(DATA_DIR, d)
             dst = os.path.join(staging_dir, d)
@@ -103,18 +134,20 @@ def upload(version_notes, owner, dataset, include_dirs=None):
         )
         print(f"\n[SUCCESS] 上传成功！")
         print(f"  Kaggle 链接: https://www.kaggle.com/datasets/{handle}")
-    except Exception as e:
-        print(f"\n[ERROR] 上传失败: {e}")
-        print("[HINT] 请确认：")
-        print("  1. Kaggle API Token 已正确配置（~/.kaggle/kaggle.json）")
-        print("  2. 你有该数据集的写入权限")
-        sys.exit(1)
-    finally:
-        shutil.rmtree(staging_dir, ignore_errors=True)
         print("[INFO] 已清理暂存目录")
 
 
 def main():
+    """
+    功能描述:
+    - 解析命令行参数并执行 Kaggle 数据集上传流程。
+
+    输入参数:
+    - 无。
+
+    返回值:
+    - None: 函数执行完成后直接在终端打印上传结果。
+    """
     parser = argparse.ArgumentParser(description="Kaggle 数据集上传工具")
     parser.add_argument(
         "--notes", type=str, default="Automated dataset update", help="版本说明"

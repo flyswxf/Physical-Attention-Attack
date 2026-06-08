@@ -6,9 +6,15 @@ import numpy as np
 
 def sanitize_attention_map(attention_map):
     """
-    将输入注意力图转换为 float32 numpy 数组，并清理非法值。
-    """
+    功能描述:
+    - 将输入注意力图转换为 `float32` 类型的 `numpy` 数组，并将非法值替换为 0。
 
+    输入参数:
+    - attention_map (array-like): 原始注意力图，可以是列表、张量或 `numpy` 数组。
+
+    返回值:
+    - numpy.ndarray: 清理后的 `float32` 注意力图。
+    """
     attention = np.asarray(attention_map, dtype=np.float32)
     attention = np.nan_to_num(attention, nan=0.0, posinf=0.0, neginf=0.0)
     return attention
@@ -16,7 +22,14 @@ def sanitize_attention_map(attention_map):
 
 def normalize_attention_for_visualization(attention_map):
     """
-    仅用于可视化的归一化，不应直接用于跨样本统计。
+    功能描述:
+    - 将注意力图线性归一化到 `[0, 1]` 区间，仅用于热力图可视化。
+
+    输入参数:
+    - attention_map (array-like): 原始注意力图。
+
+    返回值:
+    - numpy.ndarray: 归一化后的 `float32` 注意力图。
     """
     attention = sanitize_attention_map(attention_map)
 
@@ -30,10 +43,17 @@ def normalize_attention_for_visualization(attention_map):
 
 def create_patch_overlap_mask(bbox, image_size, attention_shape):
     """
-    计算 bbox 在注意力 patch 网格上的面积重叠比例。
+    功能描述:
+    - 计算文字边界框在注意力 patch 网格上的面积重叠比例掩码。
 
-    返回:
-    - overlap_mask: shape 与 attention_shape 相同，元素取值为 [0, 1]
+    输入参数:
+    - bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框，
+      格式为 `(left, top, right, bottom)`。
+    - image_size (tuple[int, int]): 原图尺寸，格式为 `(width, height)`。
+    - attention_shape (tuple[int, int]): 注意力图网格尺寸，格式为 `(grid_height, grid_width)`。
+
+    返回值:
+    - numpy.ndarray: 与 `attention_shape` 同形状的掩码数组，元素范围为 `[0, 1]`。
     """
     image_width, image_height = image_size
     grid_height, grid_width = attention_shape
@@ -51,6 +71,7 @@ def create_patch_overlap_mask(bbox, image_size, attention_shape):
     patch_height = image_height / grid_height
     overlap_mask = np.zeros((grid_height, grid_width), dtype=np.float32)
 
+    # 逐个 patch 计算与 bbox 的面积交集，避免把部分覆盖的 patch 直接当成 0 或 1。
     for row in range(grid_height):
         patch_top = row * patch_height
         patch_bottom = (row + 1) * patch_height
@@ -74,22 +95,25 @@ def create_patch_overlap_mask(bbox, image_size, attention_shape):
 
 def compute_attention_metrics(attention_map, bbox, image_size):
     """
-    基于原始 patch 注意力图，计算文本区域关注程度指标。
+    功能描述:
+    - 基于原始 patch 注意力图和文字边界框，计算文字区域的关注程度指标。
 
-    返回字段说明:
-    - bbox_attention_sum: 文本框区域内的加权注意力总量。由于使用了 bbox 与 patch
-      的面积重叠比例，这个值表示“落在文字区域里的总注意力质量”。
-    - bbox_attention_ratio: 文本框区域内注意力总量占整张图总注意力的比例。
-      这是最适合跨样本比较的核心指标之一，表示模型有多少注意力分配给了文字区域。
-    - bbox_mean_attention: 文本框覆盖到的 patch 区域上的平均注意力强度。
-      它反映的是文字区域内部“平均每单位 patch 面积”获得了多少注意力。
-    - bbox_patch_coverage: 文本框在 patch 网格上覆盖的总 patch 面积，
-      这里是按重叠比例累计后的结果，不一定是整数。
+    输入参数:
+    - attention_map (array-like): 原始 patch 级注意力图。
+    - bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框。
+    - image_size (tuple[int, int]): 原图尺寸，格式为 `(width, height)`。
+
+    返回值:
+    - dict[str, float]: 包含 `bbox_attention_sum`、`bbox_attention_ratio`、
+      `bbox_mean_attention` 和 `bbox_patch_coverage` 的指标字典。
     """
     attention = sanitize_attention_map(attention_map)
     overlap_mask = create_patch_overlap_mask(bbox, image_size, attention.shape)
 
     total_attention = float(attention.sum())
+    if total_attention <= 0:
+        raise ValueError("注意力图总和必须大于 0，无法计算比例指标。")
+
     bbox_attention_sum = float((attention * overlap_mask).sum())
     bbox_patch_coverage = float(overlap_mask.sum())
     if bbox_patch_coverage <= 0:
@@ -121,7 +145,22 @@ def build_attention_record(
     patch_type,
 ):
     """
-    组装单个样本的结构化分析记录。
+    功能描述:
+    - 汇总单个样本的基础元数据与两类注意力指标，生成可直接保存的结构化记录。
+
+    输入参数:
+    - image_name (str): 图片文件名。
+    - status (str): 攻击结果标签，例如 `"SUCCESS"` 或 `"FAIL"`。
+    - response (str): 模型生成的响应文本。
+    - bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框。
+    - image_size (tuple[int, int]): 图像尺寸，格式为 `(width, height)`。
+    - cross_attention_raw (array-like): 原始交叉注意力图。
+    - vision_attention_raw (array-like): 原始视觉自注意力图。
+    - patch (str): patch 实验条件标签。
+    - patch_type (str): patch 具体类型名称。
+
+    返回值:
+    - dict[str, int | float | str]: 单个样本的结构化分析记录。
     """
     bbox_values = [int(round(value)) for value in bbox]
     image_width, image_height = image_size
@@ -151,6 +190,7 @@ def build_attention_record(
         "bbox_bottom": bbox_values[3],
     }
 
+    # 两类注意力使用统一前缀写回记录，便于后续直接导出到 CSV/JSON。
     for prefix, metrics in (
         ("cross", cross_metrics),
         ("vision", vision_metrics),
@@ -165,9 +205,21 @@ def build_attention_record(
 
 def save_attention_arrays(output_path, bbox, attention_payload):
     """
-    将原始注意力图与 bbox 一起保存为 npz，便于后续复现实验分析。
+    功能描述:
+    - 将原始注意力图与文字边界框保存为压缩的 `npz` 文件，便于复现实验分析。
+
+    输入参数:
+    - output_path (str): 输出文件路径。
+    - bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框。
+    - attention_payload (dict[str, array-like]): 至少包含 `cross_attention_raw` 与
+      `vision_attention_raw` 两个字段的注意力数据字典。
+
+    返回值:
+    - None: 函数直接将结果保存到磁盘。
     """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     bbox_array = np.asarray(bbox, dtype=np.int32)
     np.savez_compressed(
         output_path,

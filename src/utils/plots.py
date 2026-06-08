@@ -5,13 +5,18 @@ import os
 
 def plot_attention_heatmap(image, attention_map, bbox, output_path):
     """
-    将注意力热力图叠加在原图上，并画出文字区域的Bounding Box。
+    功能描述:
+    - 将二维注意力图缩放到原图尺寸后叠加到输入图像上，并标出文字区域边界框。
 
-    参数:
-    - image: PIL Image
-    - attention_map: 2D numpy array (与原图等大或可resize的热力图数据), 取值在 [0, 1] 之间。
-    - bbox: 文本的边界框 (left, top, right, bottom)
-    - output_path: 保存路径
+    输入参数:
+    - image (PIL.Image.Image): 原始输入图像。
+    - attention_map (numpy.ndarray): 二维注意力矩阵，元素通常位于 `[0, 1]` 区间。
+    - bbox (tuple[int | float, int | float, int | float, int | float]): 文字区域边界框，
+      格式为 `(left, top, right, bottom)`。
+    - output_path (str): 热力图保存路径。
+
+    返回值:
+    - None: 函数直接将图像保存到磁盘，不返回额外结果。
     """
     import cv2
 
@@ -24,7 +29,7 @@ def plot_attention_heatmap(image, attention_map, bbox, output_path):
         image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
 
     title = "Attention Heatmap & Text Bounding Box"
-    # attention_map (例如 24x24)，需要 resize 到原图大小
+    # 模型输出通常是 patch 级注意力，这里统一缩放到像素空间后再可视化。
     if (
         attention_map.shape[0] != image_np.shape[0]
         or attention_map.shape[1] != image_np.shape[1]
@@ -63,14 +68,26 @@ def plot_attention_heatmap(image, attention_map, bbox, output_path):
     plt.axis("off")
     plt.title(title)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     plt.savefig(output_path, bbox_inches="tight", dpi=150)
     plt.close()
 
-    # print(f"Heatmap visualization saved to: {output_path}")
-
 
 def _collect_group_values(records, metric_key, group_key="status"):
+    """
+    功能描述:
+    - 按给定分组字段收集指定指标的数值列表，供箱线图等统计图复用。
+
+    输入参数:
+    - records (list[dict]): 结构化实验记录列表。
+    - metric_key (str): 需要提取的指标字段名。
+    - group_key (str): 用于分组的字段名，默认值为 `"status"`。
+
+    返回值:
+    - dict[str, list[float]]: 以分组名为键、指标数值列表为值的字典。
+    """
     grouped_values = {}
     for record in records:
         group_name = record.get(group_key, "UNKNOWN")
@@ -82,7 +99,19 @@ def plot_metric_boxplot(
     records, metric_key, output_path, title, ylabel, group_key="status"
 ):
     """
-    绘制按分组对比的箱线图。
+    功能描述:
+    - 将指定指标按分组字段绘制为箱线图，用于比较不同组别的分布差异。
+
+    输入参数:
+    - records (list[dict]): 结构化实验记录列表。
+    - metric_key (str): 需要绘制的指标字段名。
+    - output_path (str): 图像保存路径。
+    - title (str): 图表标题。
+    - ylabel (str): 纵轴标签。
+    - group_key (str): 分组字段名，默认值为 `"status"`。
+
+    返回值:
+    - None: 函数直接将图表写入磁盘。
     """
     grouped_values = _collect_group_values(records, metric_key, group_key=group_key)
     if not grouped_values:
@@ -97,7 +126,9 @@ def plot_metric_boxplot(
     plt.ylabel(ylabel)
     plt.grid(axis="y", linestyle="--", alpha=0.3)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
@@ -114,7 +145,21 @@ def plot_metric_scatter(
     group_key="status",
 ):
     """
-    绘制两个指标之间的散点关系图。
+    功能描述:
+    - 绘制两个指标之间的散点关系图，并按分组字段区分颜色。
+
+    输入参数:
+    - records (list[dict]): 结构化实验记录列表。
+    - x_key (str): 横轴指标字段名。
+    - y_key (str): 纵轴指标字段名。
+    - output_path (str): 图像保存路径。
+    - title (str): 图表标题。
+    - xlabel (str): 横轴标签。
+    - ylabel (str): 纵轴标签。
+    - group_key (str): 分组字段名，默认值为 `"status"`。
+
+    返回值:
+    - None: 函数直接将图表写入磁盘。
     """
     group_names = sorted({record.get(group_key, "UNKNOWN") for record in records})
     color_values = plt.cm.tab10(np.linspace(0, 1, max(len(group_names), 1)))
@@ -133,7 +178,7 @@ def plot_metric_scatter(
             float(record[x_key]),
             float(record[y_key]),
             alpha=0.7,
-            c=color,
+            color=color,
             label=label,
         )
 
@@ -144,7 +189,9 @@ def plot_metric_scatter(
     plt.ylabel(ylabel)
     plt.grid(linestyle="--", alpha=0.3)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()

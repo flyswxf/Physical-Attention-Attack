@@ -9,15 +9,16 @@ MODEL_REGISTRY = {
 
 def get_model(model_family, model_id=None, device="cuda"):
     """
-    根据模型系列(model_family)获取实例化的模型对象。
+    功能描述:
+    - 根据模型系列名称创建对应的模型实例，并在需要时覆盖默认模型 ID。
 
-    Args:
-        model_family (str): 模型系列名称，例如 "llava"
-        model_id (str, optional): 具体的模型ID/路径。如果为None，则使用模型的默认ID。
-        device (str): 运行设备，默认为 "cuda"
+    输入参数:
+    - model_family (str): 模型系列名称，例如 `"llava"`。
+    - model_id (str | None): 具体的模型 ID 或本地路径；为 `None` 时使用默认值。
+    - device (str): 模型运行设备，默认值为 `"cuda"`。
 
-    Returns:
-        BaseModel: 实例化后的模型对象
+    返回值:
+    - BaseModel: 已实例化但尚未加载权重的模型对象。
     """
     model_family = model_family.lower()
     if model_family not in MODEL_REGISTRY:
