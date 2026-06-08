@@ -177,10 +177,11 @@ def main():
             image_path=img_path,
             text=attack_text,
             output_path=no_patch_attack_path,
-            position=(50, 200),
+            position=(50, 600),
             font_size=40,  # 增大字体
             color="red",
             font_dir=font_dir,
+            text_area_ratio=0.30,
         )
 
         # 为两种实验条件统一生成 patch bbox 和更大邻域 bbox。
